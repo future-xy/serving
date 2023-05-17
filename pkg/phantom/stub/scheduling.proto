@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+option go_package = "github.com/ed-aisys/GPU-serverless/pkg/scheduler/proto";
+
+package scheduler;
+
+service Scheduler {
+  // Register a new model service
+  rpc RegisterModelService (RegisterModelServiceRequest) returns (RegisterModelServiceResponse) {}
+  // Scale a model service
+  rpc ScaleModelService (ScaleModelServiceRequest) returns (ScaleModelServiceResponse) {}
+  // Unregister a model service
+  rpc UnregisterModelService (UnregisterModelServiceRequest) returns (UnregisterModelServiceResponse) {}
+  // Register a new GPU instance
+  rpc RegisterGPUInstance (RegisterGPUInstanceRequest) returns (RegisterGPUInstanceResponse) {}
+}
+
+message RegisterModelServiceRequest {
+  string namespace = 1;
+  string name = 2;
+  // initial replicas
+  int32 initial_replicas = 3;
+}
+
+message RegisterModelServiceResponse {
+  int32 code = 1;
+}
+
+message ScaleModelServiceRequest {
+  string namespace = 1;
+  string name = 2;
+  int32 replicas = 3;
+}
+
+message ScaleModelServiceResponse {
+  int32 code = 1;
+}
+
+message UnregisterModelServiceRequest {
+  string namespace = 1;
+  string name = 2;
+}
+
+message UnregisterModelServiceResponse {
+  int32 code = 1;
+}
+
+message RegisterGPUInstanceRequest {
+  string name = 1;
+  string ip = 2;
+  int32 gpu = 3;
+  int32 memory = 4;
+  int32 cpu = 5;
+}
+
+message RegisterGPUInstanceResponse {
+  int32 code = 1;
+}

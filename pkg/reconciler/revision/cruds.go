@@ -19,6 +19,7 @@ package revision
 import (
 	"context"
 	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -34,12 +35,40 @@ import (
 	"knative.dev/serving/pkg/networking"
 	"knative.dev/serving/pkg/reconciler/revision/config"
 	"knative.dev/serving/pkg/reconciler/revision/resources"
+
+	"google.golang.org/grpc"
+	pb "knative.dev/serving/pkg/phantom/stub"
+)
+
+var (
+	addr = "129.215.164.41:20051"
 )
 
 func (c *Reconciler) createDeployment(ctx context.Context, rev *v1.Revision) (*appsv1.Deployment, error) {
 	cfgs := config.FromContext(ctx)
-
+	logger := logging.FromContext(ctx)
 	deployment, err := resources.MakeDeployment(rev, cfgs)
+
+	// show deployment's annotations
+	logger.Infof("Deployment Annotations: %v", deployment.Annotations)
+	if deployment.Annotations["ed-aisys/phantom"] == "true" {
+		// start a grpc client to send the deployment namespace, name and replica count to the autoscaler
+		conn, err := grpc.Dial(addr, grpc.WithInsecure())
+		if err != nil {
+			logger.Errorf("did not connect: %v", err)
+		}
+		defer conn.Close()
+		client := pb.NewSchedulerClient(conn)
+
+		// Contact the server and print out its response.
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		r, err := client.RegisterModelService(ctx, &pb.RegisterModelServiceRequest{Namespace: deployment.Namespace, Name: deployment.Name, InitialReplicas: *deployment.Spec.Replicas})
+		if err != nil {
+			logger.Errorf("could not register: %v", err)
+		}
+		logger.Infof("Phantom: %s", r.Code)
+	}
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to make deployment: %w", err)

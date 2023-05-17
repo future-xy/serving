@@ -45,6 +45,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/cache"
+
+	"google.golang.org/grpc"
+	pb "knative.dev/serving/pkg/phantom/stub"
 )
 
 const (
@@ -321,6 +324,36 @@ func (ks *scaler) applyScale(ctx context.Context, pa *autoscalingv1alpha1.PodAut
 	return nil
 }
 
+var (
+	addr = "129.215.164.41:20051"
+)
+
+func (ks *scaler) applyPhantomScale(ctx context.Context, pa *autoscalingv1alpha1.PodAutoscaler, desiredScale int32,
+	ps *autoscalingv1alpha1.PodScalable) error {
+	logger := logging.FromContext(ctx)
+
+	logger.Debug("Apply to Phantom Scheduler")
+
+	conn, err := grpc.Dial(addr, grpc.WithInsecure())
+	if err != nil {
+		logger.Error("cannot connect: %v", err)
+	}
+	defer conn.Close()
+	c := pb.NewSchedulerClient(conn)
+
+	// Contact the server and print out its response.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	r, err := c.ScaleModelService(ctx, &pb.ScaleModelServiceRequest{Namespace: pa.Namespace, Name: ps.Name, Replicas: desiredScale})
+	if err != nil {
+		logger.Error("could not greet: %v", err)
+	}
+	logger.Debug("Phantom Scheduler Response: ", r.Code)
+
+	logger.Debug("Successfully scaled to ", desiredScale)
+	return nil
+}
+
 // scale attempts to scale the given PA's target reference to the desired scale.
 func (ks *scaler) scale(ctx context.Context, pa *autoscalingv1alpha1.PodAutoscaler, sks *netv1alpha1.ServerlessService, desiredScale int32) (int32, error) {
 	asConfig := config.FromContext(ctx).Autoscaler
@@ -359,14 +392,23 @@ func (ks *scaler) scale(ctx context.Context, pa *autoscalingv1alpha1.PodAutoscal
 		return desiredScale, fmt.Errorf("failed to get scale target %v: %w", pa.Spec.ScaleTargetRef, err)
 	}
 
-	currentScale := int32(1)
-	if ps.Spec.Replicas != nil {
-		currentScale = *ps.Spec.Replicas
-	}
-	if desiredScale == currentScale {
-		return desiredScale, nil
-	}
+	// show ps annotations
+	logger.Debug("ps annotations: ", ps.Annotations)
 
-	logger.Infof("Scaling from %d to %d", currentScale, desiredScale)
-	return desiredScale, ks.applyScale(ctx, pa, desiredScale, ps)
+	// use phantom scheduler only when the annotation["ed-aisys/phantom"] is "true"
+	if ps.Annotations["ed-aisys/phantom"] == "true" {
+		logger.Infof("Scaling to %d", desiredScale)
+		return desiredScale, ks.applyPhantomScale(ctx, pa, desiredScale, ps)
+	} else {
+		currentScale := int32(1)
+		if ps.Spec.Replicas != nil {
+			currentScale = *ps.Spec.Replicas
+		}
+		if desiredScale == currentScale {
+			return desiredScale, nil
+		}
+
+		logger.Infof("Scaling to %d", desiredScale)
+		return desiredScale, ks.applyScale(ctx, pa, desiredScale, ps)
+	}
 }
